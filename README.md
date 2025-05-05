@@ -1,1 +1,3 @@
-# Clustering-and-3D-Visualization
+## object
+Implement different clustering methods to synthetic and real-world data and validate using external and internal validation techniques.
+

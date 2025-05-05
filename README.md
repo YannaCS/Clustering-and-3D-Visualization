@@ -30,12 +30,13 @@ The project analyzes two different 3D datasets (Data1 and Data5) using both K-me
 
 ## Conclusion
 This study demonstrates that both K-means and Hierarchical clustering algorithms can effectively identify the natural groupings in 3D datasets. Key findings include:
-1. For Dataset 1 (with 2 classes), hierarchical clustering at k=5 provided slightly better results than K-means.<img width="836" alt="image" src="https://github.com/user-attachments/assets/cd2a6d5c-958d-4dc1-91da-c2cbec5e0863" />
+1. For Dataset 1 (with 2 classes), hierarchical clustering at k=5 provided slightly better results than K-means.
+<img width="836" alt="image" src="https://github.com/user-attachments/assets/cd2a6d5c-958d-4dc1-91da-c2cbec5e0863" />
 <img width="762" alt="image" src="https://github.com/user-attachments/assets/411cb4bc-f445-4594-8532-dc280f8226af" />
 
-2. For Dataset 5 (with 7 classes), both algorithms achieved perfect clustering (precision=1.0, recall=1.0) when k=7, validating that both methods can correctly identify the actual class structure when properly configured.
-3. The silhouette score and CH index proved reliable metrics for determining the optimal number of clusters, consistently pointing to the correct value in our experiments.
-4. Visualizing clustering results in 3D space provides valuable insights into the strengths and weaknesses of different algorithms and parameter choices.
+3. For Dataset 5 (with 7 classes), both algorithms achieved perfect clustering (precision=1.0, recall=1.0) when k=7, validating that both methods can correctly identify the actual class structure when properly configured.
+4. The silhouette score and CH index proved reliable metrics for determining the optimal number of clusters, consistently pointing to the correct value in our experiments.
+5. Visualizing clustering results in 3D space provides valuable insights into the strengths and weaknesses of different algorithms and parameter choices.
 
 This work highlights the importance of using multiple validation metrics and visualization techniques when applying unsupervised learning methods to ensure reliable results.
 

@@ -17,7 +17,7 @@ def show():
     if dataset_choice == "Data1":
         # Load Data1 from the provided CSV or create it
         try:
-            data1 = pd.read_csv("Data1.csv")
+            data1 = pd.read_csv("./data/Data1.csv")
             if "Unnamed: 0" in data1.columns:
                 data1 = data1.drop(columns=["Unnamed: 0"])
         except:
@@ -38,7 +38,7 @@ def show():
     elif dataset_choice == "Data5":
         # Load Data5 from the provided CSV or create it
         try:
-            data5 = pd.read_csv("Data5.csv")
+            data5 = pd.read_csv("./data/Data5.csv")
             if "Unnamed: 0" in data5.columns:
                 data5 = data5.drop(columns=["Unnamed: 0"])
         except:

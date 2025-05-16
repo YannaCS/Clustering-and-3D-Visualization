@@ -20,8 +20,14 @@ def choose_k(train_data):
         kmeans.fit(train_data)
         inertias.append(kmeans.inertia_)
         if k > 1:
-            silhouettes.append(silhouette_score(train_data, kmeans.labels_))
-            ch_coeffs.append(calinski_harabasz_score(train_data, kmeans.labels_))
+            try:
+                silhouettes.append(silhouette_score(train_data, kmeans.labels_))
+                ch_coeffs.append(calinski_harabasz_score(train_data, kmeans.labels_))
+            except Exception as e:
+                # Handle potential errors with scoring functions
+                print(f"Error calculating metrics for k={k}: {str(e)}")
+                silhouettes.append(0)
+                ch_coeffs.append(0)
     
     fig = plt.figure(figsize=(10, 4))
     grid = plt.GridSpec(1, 3, wspace=0.3)
@@ -50,21 +56,30 @@ def external_performance_by_pair_confusion(true_label, pred_label, n_clusters):
     """Function to evaluate clustering performance against ground truth"""
     performance = pd.DataFrame(columns=['Pr', 'Recall', 'J', 'Rand', 'FM'])
     
-    # Get confusion matrix
-    matrix = pd.DataFrame(pair_confusion_matrix(true_label, pred_label))
-    
-    # Extract values
-    TN = matrix.iloc[0, 0]
-    FP = matrix.iloc[0, 1]
-    FN = matrix.iloc[1, 0]
-    TP = matrix.iloc[1, 1]
-    
-    # Calculate metrics
-    performance.loc[0, 'Pr'] = TP/(TP+FP) if (TP+FP) > 0 else 0
-    performance.loc[0, 'Recall'] = TP/(TP+FN) if (TP+FN) > 0 else 0
-    performance.loc[0, 'J'] = TP/(TP+FP+FN) if (TP+FP+FN) > 0 else 0
-    performance.loc[0, 'Rand'] = (TP+TN)/(TP+TN+FP+FN) if (TP+TN+FP+FN) > 0 else 0
-    performance.loc[0, 'FM'] = ((TP/(TP+FP))*(TP/(TP+FN)))**(0.5) if (TP+FP)*(TP+FN) > 0 else 0
+    try:
+        # Get confusion matrix
+        matrix = pd.DataFrame(pair_confusion_matrix(true_label, pred_label))
+        
+        # Extract values
+        TN = matrix.iloc[0, 0]
+        FP = matrix.iloc[0, 1]
+        FN = matrix.iloc[1, 0]
+        TP = matrix.iloc[1, 1]
+        
+        # Calculate metrics
+        performance.loc[0, 'Pr'] = TP/(TP+FP) if (TP+FP) > 0 else 0
+        performance.loc[0, 'Recall'] = TP/(TP+FN) if (TP+FN) > 0 else 0
+        performance.loc[0, 'J'] = TP/(TP+FP+FN) if (TP+FP+FN) > 0 else 0
+        performance.loc[0, 'Rand'] = (TP+TN)/(TP+TN+FP+FN) if (TP+TN+FP+FN) > 0 else 0
+        performance.loc[0, 'FM'] = ((TP/(TP+FP))*(TP/(TP+FN)))**(0.5) if (TP+FP)*(TP+FN) > 0 else 0
+    except Exception as e:
+        print(f"Error calculating performance metrics: {str(e)}")
+        # Set default values in case of error
+        performance.loc[0, 'Pr'] = 0
+        performance.loc[0, 'Recall'] = 0
+        performance.loc[0, 'J'] = 0
+        performance.loc[0, 'Rand'] = 0
+        performance.loc[0, 'FM'] = 0
     
     # Rename the index by n_clusters
     performance.index = pd.Series([f'k={n_clusters}'])
@@ -137,12 +152,29 @@ def plot_performance_comparison(df_kmeans, df_hierarchical, k_value):
     fig, ax = plt.subplots(figsize=(10, 6))
     x = np.arange(len(metrics))
     
-    # Filter for the specific k-value
-    kmeans_data = df_kmeans.loc[f'k={k_value}', metrics].values
-    hierarchical_data = df_hierarchical.loc[f'k={k_value}', metrics].values
-    
-    ax.bar(x - width/2, kmeans_data, width, label='K-Means')
-    ax.bar(x + width/2, hierarchical_data, width, label='Hierarchical')
+    try:
+        # Filter for the specific k-value
+        k_idx = f'k={k_value}'
+        
+        # Check if the k value exists in both DataFrames
+        if k_idx in df_kmeans.index and k_idx in df_hierarchical.index:
+            kmeans_data = df_kmeans.loc[k_idx, metrics].values
+            hierarchical_data = df_hierarchical.loc[k_idx, metrics].values
+            
+            ax.bar(x - width/2, kmeans_data, width, label='K-Means')
+            ax.bar(x + width/2, hierarchical_data, width, label='Hierarchical')
+        else:
+            # Use the first available index if the specific k doesn't exist
+            kmeans_data = df_kmeans.iloc[0][metrics].values if not df_kmeans.empty else np.zeros(len(metrics))
+            hierarchical_data = df_hierarchical.iloc[0][metrics].values if not df_hierarchical.empty else np.zeros(len(metrics))
+            
+            ax.bar(x - width/2, kmeans_data, width, label='K-Means')
+            ax.bar(x + width/2, hierarchical_data, width, label='Hierarchical')
+    except Exception as e:
+        print(f"Error creating performance comparison: {str(e)}")
+        # Create empty bars in case of error
+        ax.bar(x - width/2, np.zeros(len(metrics)), width, label='K-Means')
+        ax.bar(x + width/2, np.zeros(len(metrics)), width, label='Hierarchical')
     
     ax.set_xticks(x)
     ax.set_xticklabels(metrics)
@@ -157,11 +189,18 @@ def plot_performance_metrics(df_performances, method_name="Clustering"):
     """Plot the performance metrics across different k values"""
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    for column in df_performances.columns:
-        ax.plot(range(2, 11), df_performances[column], label=column)
+    # If the DataFrame is empty, return an empty plot
+    if df_performances.empty:
+        ax.set_title(f"No performance data available for {method_name}")
+        return fig
     
-    ax.set_xticks(range(2, 11))
-    ax.set_xticklabels([f'k={i}' for i in range(2, 11)])
+    for column in df_performances.columns:
+        ax.plot(range(len(df_performances)), df_performances[column], label=column)
+    
+    # Set x-axis labels based on actual index values
+    ax.set_xticks(range(len(df_performances)))
+    ax.set_xticklabels(df_performances.index)
+    
     ax.set_ylabel('Coefficient')
     ax.set_xlabel('Number of clusters')
     ax.set_title(f'Performance Metrics for {method_name}')
@@ -246,51 +285,81 @@ def run_clustering_analysis(data):
     kmeans_performances = pd.DataFrame(columns=['Pr', 'Recall', 'J', 'Rand', 'FM'])
     hierarchical_performances = pd.DataFrame(columns=['Pr', 'Recall', 'J', 'Rand', 'FM'])
     
-    for k in range(2, 11):
-        # K-means
-        kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
-        kmeans.fit(features)
-        kmeans_perf = external_performance_by_pair_confusion(labels, kmeans.labels_, k)
-        kmeans_performances = pd.concat([kmeans_performances, kmeans_perf])
-        
-        # Hierarchical
-        hierarchical = AgglomerativeClustering(n_clusters=k)
-        hierarchical.fit(features)
-        hierarchical_perf = external_performance_by_pair_confusion(labels, hierarchical.labels_, k)
-        hierarchical_performances = pd.concat([hierarchical_performances, hierarchical_perf])
+    max_k = min(10, len(data_copy) - 1)  # Ensure k is less than the number of data points
     
-    # Find best k-value based on Rand index
-    best_k_kmeans = kmeans_performances['Rand'].idxmax()
-    best_k_hierarchical = hierarchical_performances['Rand'].idxmax()
-    best_k_kmeans_value = int(best_k_kmeans.split('=')[1])
-    best_k_hierarchical_value = int(best_k_hierarchical.split('=')[1])
+    for k in range(2, max_k + 1):
+        try:
+            # K-means
+            kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
+            kmeans.fit(features)
+            kmeans_perf = external_performance_by_pair_confusion(labels, kmeans.labels_, k)
+            kmeans_performances = pd.concat([kmeans_performances, kmeans_perf])
+            
+            # Hierarchical
+            hierarchical = AgglomerativeClustering(n_clusters=k)
+            hierarchical.fit(features)
+            hierarchical_perf = external_performance_by_pair_confusion(labels, hierarchical.labels_, k)
+            hierarchical_performances = pd.concat([hierarchical_performances, hierarchical_perf])
+        except Exception as e:
+            print(f"Error running clustering for k={k}: {str(e)}")
+            # Add default performance values in case of error
+            default_perf = pd.DataFrame({
+                'Pr': [0], 'Recall': [0], 'J': [0], 'Rand': [0], 'FM': [0]
+            }, index=[f'k={k}'])
+            kmeans_performances = pd.concat([kmeans_performances, default_perf])
+            hierarchical_performances = pd.concat([hierarchical_performances, default_perf])
     
-    # Determine overall best k (compromise between methods if they differ)
-    if best_k_kmeans_value == best_k_hierarchical_value:
-        best_k = best_k_kmeans_value
+    # Default best k value
+    best_k = 2
+    
+    # Find best k-value based on Rand index if data is available
+    if not kmeans_performances.empty and not hierarchical_performances.empty:
+        try:
+            best_k_kmeans = kmeans_performances['Rand'].idxmax()
+            best_k_hierarchical = hierarchical_performances['Rand'].idxmax()
+            best_k_kmeans_value = int(best_k_kmeans.split('=')[1])
+            best_k_hierarchical_value = int(best_k_hierarchical.split('=')[1])
+            
+            # Determine overall best k (compromise between methods if they differ)
+            if best_k_kmeans_value == best_k_hierarchical_value:
+                best_k = best_k_kmeans_value
+            else:
+                # Use the mean of the two, rounded
+                best_k = round((best_k_kmeans_value + best_k_hierarchical_value) / 2)
+        except Exception as e:
+            print(f"Error determining best k value: {str(e)}")
+            # Default to k=2 if we encounter issues
+            best_k = 2
+            best_k_kmeans_value = 2
+            best_k_hierarchical_value = 2
     else:
-        # Use the mean of the two, rounded
-        best_k = round((best_k_kmeans_value + best_k_hierarchical_value) / 2)
+        # Default values if performances are empty
+        best_k = 2
+        best_k_kmeans_value = 2
+        best_k_hierarchical_value = 2
     
     # Run K-means and hierarchical with the best k
-    kmeans_best = KMeans(n_clusters=best_k, n_init=10, random_state=42)
-    kmeans_best.fit(features)
-    hierarchical_best = AgglomerativeClustering(n_clusters=best_k)
-    hierarchical_best.fit(features)
-    
-    # Create 3D plots
-    comparison_fig = create_comparison_fig(
-        data_copy, kmeans_best.labels_, hierarchical_best.labels_, best_k
-    )
-    
-    # Performance comparison chart
-    performance_fig = plot_performance_comparison(
-        kmeans_performances, hierarchical_performances, best_k
-    )
-    
-    # Performance metrics plots
-    kmeans_metrics_fig = plot_performance_metrics(kmeans_performances, "K-means")
-    hierarchical_metrics_fig = plot_performance_metrics(hierarchical_performances, "Hierarchical")
+    try:
+        kmeans_best = KMeans(n_clusters=best_k, n_init=10, random_state=42)
+        kmeans_best.fit(features)
+        hierarchical_best = AgglomerativeClustering(n_clusters=best_k)
+        hierarchical_best.fit(features)
+        
+        # Create 3D plots
+        comparison_fig = create_comparison_fig(
+            data_copy, kmeans_best.labels_, hierarchical_best.labels_, best_k
+        )
+        
+        # Performance comparison chart
+        performance_fig = plot_performance_comparison(
+            kmeans_performances, hierarchical_performances, best_k
+        )
+        
+        # Performance metrics plots
+        kmeans_metrics_fig = plot_performance_metrics(kmeans_performances, "K-means")
+        hierarchical_metrics_fig = plot_performance_metrics(hierarchical_performances, "Hierarchical")
+    except Exception as e:
+        return None, f"Error generating visualizations: {str(e)}"
     
     results = {
         'k_plot': k_plot,

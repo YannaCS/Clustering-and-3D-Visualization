@@ -31,4 +31,4 @@ elif page == "Upload Your Data":
 
 # Add footer
 st.markdown("---")
-st.write("Clustering Analysis Dashboard created with Streamlit")
+st.write("Clustering Analysis Dashboard created by Yanna")

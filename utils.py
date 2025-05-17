@@ -7,15 +7,140 @@ from plotly.subplots import make_subplots
 from sklearn.cluster import KMeans, AgglomerativeClustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score
 from sklearn.metrics.cluster import pair_confusion_matrix, contingency_matrix
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.signal import argrelextrema
 import math
+from kneed import KneeLocator
+
+def find_peak_or_elbow(values, method="peak", consider_rate_of_change=True):
+    """
+    Finds the peak or elbow point in an array of values, considering the rate of change.
+    
+    Parameters:
+    - values: array of metric values for different k
+    - method: "peak" to find peak value, "elbow" to find elbow point
+    - consider_rate_of_change: If True, prioritize points with significant rate of change
+    
+    Returns:
+    - index of peak/elbow (corresponding to k value)
+    """
+    if len(values) < 3:
+        return 0  # Not enough values to find a peak/elbow
+        
+    if method == "peak":
+        # Calculate the first derivative (rate of change)
+        derivatives = np.diff(values)
+        
+        # If we need to consider rate of change
+        if consider_rate_of_change and len(derivatives) >= 2:
+            # Find the points where derivative changes sign (peaks in original function)
+            sign_changes = np.where(np.diff(np.signbit(derivatives)))[0]
+            
+            # If we found sign changes (peaks)
+            if len(sign_changes) > 0:
+                # Get the actual indices in original values
+                peak_indices = sign_changes + 1
+                
+                # Calculate score for each peak combining the height and derivative magnitude
+                peak_scores = []
+                max_value = max(values)
+                max_deriv = max(abs(derivatives)) if max(abs(derivatives)) > 0 else 1
+                
+                for i in peak_indices:
+                    if i > 0 and i < len(values) - 1:
+                        # Normalize the values to 0-1 range
+                        value_score = values[i] / max_value
+                        
+                        # Calculate average rate of change before this point
+                        if i > 1:
+                            before_deriv = abs(np.mean(derivatives[:i-1]))
+                        else:
+                            before_deriv = abs(derivatives[0])
+                        
+                        # Calculate rate of change after this point (if available)
+                        if i < len(derivatives):
+                            after_deriv = abs(derivatives[i])
+                        else:
+                            after_deriv = 0
+                        
+                        # The difference in derivatives indicates how "sharp" the peak is
+                        deriv_diff = abs(before_deriv - after_deriv) / max_deriv
+                        
+                        # Combine metrics: value itself and change in rate
+                        # We want high values with sharp changes in rate
+                        combined_score = value_score * (0.5 + 0.5 * deriv_diff)
+                        peak_scores.append((i, combined_score))
+                
+                # Get the peak with the highest combined score
+                if peak_scores:
+                    best_idx, _ = max(peak_scores, key=lambda x: x[1])
+                    return best_idx
+            
+            # If no peaks found by derivative sign change, find the point with the biggest 
+            # drop in derivative (where it starts slowing down the most)
+            deriv_drops = np.diff(derivatives)
+            if len(deriv_drops) > 0:
+                # Find the biggest drop (most negative second derivative)
+                biggest_drop_idx = np.argmin(deriv_drops) + 1
+                # Only use this if it corresponds to a reasonably high value
+                if values[biggest_drop_idx] > 0.7 * max(values):
+                    return biggest_drop_idx
+        
+        # Fallback: find local maxima
+        local_max_indices = list(argrelextrema(np.array(values), np.greater)[0])
+        
+        if not local_max_indices:
+            # If no local maxima, just return the global maximum
+            return np.argmax(values)
+        else:
+            # Return the index of the highest local maximum
+            max_idx = max(local_max_indices, key=lambda i: values[i])
+            return max_idx
+    
+    elif method == "elbow":
+        try:
+            # Use KneeLocator to find the elbow
+            knee = KneeLocator(
+                range(len(values)), values, curve='convex', 
+                direction='increasing' if values[-1] > values[0] else 'decreasing'
+            )
+            if knee.knee is not None:
+                return knee.knee
+        except Exception as e:
+            print(f"Error using KneeLocator: {str(e)}")
+        
+        # Fallback method: find where the rate of change significantly decreases
+        if values[-1] > values[0]:  # Increasing values
+            # Calculate derivatives
+            derivatives = np.diff(values)
+            for i in range(1, len(derivatives)):
+                # If the derivative drops by more than 50% of the max derivative
+                if derivatives[i] < 0.5 * np.max(derivatives[:i]):
+                    return i
+        else:  # Decreasing values
+            derivatives = np.diff(values)
+            for i in range(1, len(derivatives)):
+                # If the derivative becomes less negative by more than 50% of the min derivative
+                if derivatives[i] > 0.5 * np.min(derivatives[:i]):
+                    return i
+        
+        # If no clear elbow is found, return the index of the max/min value
+        return np.argmax(values) if values[-1] > values[0] else np.argmin(values)
+    
+    else:
+        raise ValueError(f"Unknown method: {method}")
 
 def choose_k(train_data):
-    """Function to determine optimal number of clusters"""
+    """Function to determine optimal number of clusters with automated detection"""
     inertias = []
     silhouettes = []
     ch_coeffs = []
     
-    for k in range(1,11):
+    # Get maximum K value based on data size
+    max_k = min(10, len(train_data) - 1)
+    k_range = range(1, max_k + 1)
+    
+    for k in k_range:
         kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
         kmeans.fit(train_data)
         inertias.append(kmeans.inertia_)
@@ -24,33 +149,189 @@ def choose_k(train_data):
                 silhouettes.append(silhouette_score(train_data, kmeans.labels_))
                 ch_coeffs.append(calinski_harabasz_score(train_data, kmeans.labels_))
             except Exception as e:
-                # Handle potential errors with scoring functions
                 print(f"Error calculating metrics for k={k}: {str(e)}")
                 silhouettes.append(0)
                 ch_coeffs.append(0)
     
-    fig = plt.figure(figsize=(10, 4))
-    grid = plt.GridSpec(1, 3, wspace=0.3)
+    # Automate best K detection
+    best_k_values = {}
     
-    plt.subplot(grid[0, 0])
-    plt.plot(range(1, 11), inertias)
-    plt.xlabel("K (number of clusters)")
-    plt.ylabel("Inertia (Within-Cluster Distances)")
-    plt.title("Elbow Plot")
+    # 1. Elbow Method - Using KneeLocator from kneed package
+    try:
+        knee = KneeLocator(
+            k_range[:-1], inertias[:-1], curve='convex', direction='decreasing'
+        )
+        best_k_values['elbow'] = knee.elbow if knee.elbow else 2
+    except Exception as e:
+        print(f"Error in elbow method: {str(e)}")
+        # Alternative: Calculate percentage decrease
+        if len(inertias) > 2:
+            percent_decreases = [(inertias[i-1] - inertias[i])/inertias[i-1] * 100 for i in range(1, len(inertias))]
+            # Find where the percentage decrease falls below 20%
+            for i, decrease in enumerate(percent_decreases, 2):
+                if decrease < 20:
+                    best_k_values['elbow'] = i
+                    break
+            else:
+                best_k_values['elbow'] = 2
+        else:
+            best_k_values['elbow'] = 2
     
-    plt.subplot(grid[0, 1])
-    plt.plot(range(2, 11), silhouettes)
-    plt.xlabel("K (number of clusters)")
-    plt.ylabel("Silhouette Score")
-    plt.title("Silhouette Plot")
+    # 2. Silhouette Method - Find peak or where increase rate slows
+    if silhouettes:
+        peak_idx = find_peak_or_elbow(silhouettes, method="peak")
+        best_k_values['silhouette'] = peak_idx + 2  # +2 because silhouette starts at k=2
+    else:
+        best_k_values['silhouette'] = 2
     
-    plt.subplot(grid[0, 2])
-    plt.plot(range(2, 11), ch_coeffs)
-    plt.xlabel("K (number of clusters)")
-    plt.ylabel("CH Score")
-    plt.title("Calinski-Harabasz Plot")
+    # 3. Calinski-Harabasz Method - Find peak or where increase rate slows
+    if ch_coeffs:
+        peak_idx = find_peak_or_elbow(ch_coeffs, method="peak")
+        best_k_values['ch'] = peak_idx + 2  # +2 because CH starts at k=2
+    else:
+        best_k_values['ch'] = 2
     
-    return fig, silhouettes, ch_coeffs, inertias
+    # Ensemble approach - Vote or take median
+    best_k_counts = {}
+    for method, k in best_k_values.items():
+        if k in best_k_counts:
+            best_k_counts[k] += 1
+        else:
+            best_k_counts[k] = 1
+    
+    # If there's a majority vote (at least 2 methods agree), use that k
+    max_votes = max(best_k_counts.values())
+    if max_votes >= 2:
+        for k, votes in best_k_counts.items():
+            if votes == max_votes:
+                ensemble_best_k = k
+                break
+    else:
+        # If all methods disagree, take the median
+        ensemble_best_k = int(np.median(list(best_k_values.values())))
+    
+    # Create the visualization with improved layout using standard matplotlib
+    fig = plt.figure(figsize=(15, 8))
+    
+    # Main title
+    plt.suptitle("Determining the Optimal Number of Clusters", fontsize=16, y=0.98)
+    
+    # Create the subplots with fixed positions
+    ax_kmeans_title = plt.subplot2grid((4, 4), (0, 0), colspan=3, rowspan=1)
+    ax_hier_title = plt.subplot2grid((4, 4), (0, 3), colspan=1, rowspan=1)
+    
+    ax1 = plt.subplot2grid((4, 4), (1, 0), colspan=1, rowspan=3)  # Elbow plot
+    ax2 = plt.subplot2grid((4, 4), (1, 1), colspan=1, rowspan=3)  # Silhouette plot
+    ax3 = plt.subplot2grid((4, 4), (1, 2), colspan=1, rowspan=3)  # CH plot
+    ax4 = plt.subplot2grid((4, 4), (1, 3), colspan=1, rowspan=3)  # Dendrogram
+    
+    # Add section titles
+    ax_kmeans_title.text(0.5, 0.5, "K-means Clustering Evaluation Metrics", 
+                     ha='center', va='center', fontsize=14, fontweight='bold')
+    ax_kmeans_title.axis('off')
+    
+    ax_hier_title.text(0.5, 0.5, "Hierarchical Clustering", 
+                   ha='center', va='center', fontsize=14, fontweight='bold')
+    ax_hier_title.axis('off')
+    
+    # Elbow plot
+    ax1.plot(k_range, inertias)
+    ax1.axvline(x=best_k_values['elbow'], color='r', linestyle='--')
+    ax1.set_xlabel("K (number of clusters)")
+    ax1.set_ylabel("Inertia (Within-Cluster Distances)")
+    ax1.set_title(f"Elbow Plot (Best K: {best_k_values['elbow']})")
+    
+    # Silhouette plot
+    ax2.plot(range(2, max_k + 1), silhouettes)
+    ax2.axvline(x=best_k_values['silhouette'], color='r', linestyle='--')
+    
+    # Add first derivative to the silhouette plot
+    if len(silhouettes) > 2:
+        # Plot the rate of change (first derivative)
+        first_deriv = np.diff(silhouettes)
+        # Normalize first derivative to fit on the same scale
+        max_silhouette = max(abs(np.max(silhouettes)), 0.001)  # Avoid division by zero
+        norm_deriv = first_deriv * (max_silhouette / max(abs(first_deriv) + 0.001)) * 0.5
+        
+        # Plot first derivative
+        ax2_2 = ax2.twinx()
+        ax2_2.plot(range(3, max_k + 1), norm_deriv, 'g--', alpha=0.5)
+        ax2_2.set_ylabel("Rate of Change", color='g')
+        ax2_2.tick_params(axis='y', labelcolor='g')
+    
+    ax2.set_xlabel("K (number of clusters)")
+    ax2.set_ylabel("Silhouette Score")
+    ax2.set_title(f"Silhouette Plot (Best K: {best_k_values['silhouette']})")
+    
+    # CH plot
+    ax3.plot(range(2, max_k + 1), ch_coeffs)
+    ax3.axvline(x=best_k_values['ch'], color='r', linestyle='--')
+    
+    # Add first derivative to the CH plot
+    if len(ch_coeffs) > 2:
+        # Plot the rate of change (first derivative)
+        first_deriv = np.diff(ch_coeffs)
+        # Normalize first derivative to fit on the same scale
+        max_ch = max(abs(np.max(ch_coeffs)), 0.001)  # Avoid division by zero
+        norm_deriv = first_deriv * (max_ch / max(abs(first_deriv) + 0.001)) * 0.5
+        
+        # Plot first derivative
+        ax3_2 = ax3.twinx()
+        ax3_2.plot(range(3, max_k + 1), norm_deriv, 'g--', alpha=0.5)
+        ax3_2.set_ylabel("Rate of Change", color='g')
+        ax3_2.tick_params(axis='y', labelcolor='g')
+    
+    ax3.set_xlabel("K (number of clusters)")
+    ax3.set_ylabel("CH Score")
+    ax3.set_title(f"CH Plot (Best K: {best_k_values['ch']})")
+    
+    # Create hierarchical clustering dendrogram
+    # Calculate the linkage matrix
+    Z = linkage(train_data, method='ward')
+    
+    # Plot dendrogram
+    dendrogram(Z, truncate_mode='level', p=3, ax=ax4)
+    
+    # If best_k is provided, add a horizontal line showing where to cut for that number of clusters
+    if ensemble_best_k:
+        # Find the height to cut the tree to get the desired number of clusters
+        last_merge = Z[-(ensemble_best_k-1), 2]
+        ax4.axhline(y=last_merge, color='r', linestyle='--')
+        ax4.set_title(f"Hierarchical Clustering Dendrogram\n(Best K: {ensemble_best_k})")
+    else:
+        ax4.set_title("Hierarchical Clustering Dendrogram")
+    
+    ax4.set_xlabel("Node Points")
+    ax4.set_ylabel("Distance")
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for the suptitle
+    
+    return fig, silhouettes, ch_coeffs, inertias, ensemble_best_k, best_k_values
+
+def plot_dendrogram(data, best_k=None):
+    """Create hierarchical clustering dendrogram with optimal cut line"""
+    # Calculate the linkage matrix
+    Z = linkage(data, method='ward')
+    
+    # Create figure
+    plt.figure(figsize=(10, 6))
+    
+    # Plot dendrogram
+    dendrogram(Z, truncate_mode='level', p=3)
+    
+    # If best_k is provided, add a horizontal line showing where to cut for that number of clusters
+    if best_k:
+        # Find the height to cut the tree to get the desired number of clusters
+        last_merge = Z[-(best_k-1), 2]
+        plt.axhline(y=last_merge, color='r', linestyle='--')
+        plt.title(f"Hierarchical Clustering Dendrogram (Best K: {best_k})")
+    else:
+        plt.title("Hierarchical Clustering Dendrogram")
+    
+    plt.xlabel("Number of points in node (or index of point if no parenthesis)")
+    plt.ylabel("Distance")
+    
+    return plt.gcf()
 
 def external_performance_by_pair_confusion(true_label, pred_label, n_clusters):
     """Function to evaluate clustering performance against ground truth"""
@@ -94,11 +375,20 @@ def plot_clusters_3d(data, labels, title="3D Cluster Visualization"):
     )
     return fig
 
-def create_comparison_fig(original_data, kmeans_results, hierarchical_results, k_value):
+
+def create_comparison_fig(original_data, kmeans_results, hierarchical_results, title_suffix=""):
     """Create a side-by-side comparison of clustering methods"""
+    # Determine if title_suffix contains k values
+    if isinstance(title_suffix, str) and title_suffix and not title_suffix.startswith("k="):
+        subplot_titles = ('Original Classes', f'K-Means ({title_suffix})', f'Hierarchical ({title_suffix})')
+    else:
+        # Default title with k value
+        k_value = title_suffix if isinstance(title_suffix, str) else f"k={title_suffix}" if title_suffix else ""
+        subplot_titles = ('Original Classes', f'K-Means {k_value}', f'Hierarchical {k_value}')
+    
     fig = make_subplots(
         rows=1, cols=3,
-        subplot_titles=('Original Classes', f'K-Means (k={k_value})', f'Hierarchical (k={k_value})'),
+        subplot_titles=subplot_titles,
         specs=[[{"type": "scene"}, {"type": "scene"}, {"type": "scene"}]]
     )
     
@@ -278,8 +568,8 @@ def run_clustering_analysis(data):
     features = data_copy.drop(columns=['Class'])
     labels = data_copy['Class']
     
-    # Determine optimal number of clusters
-    k_plot, silhouettes, ch_scores, inertias = choose_k(features)
+    # Determine optimal number of clusters with automated detection
+    combined_plot, silhouettes, ch_scores, inertias, ensemble_best_k, best_k_values = choose_k(features)
     
     # Run K-means and hierarchical clustering for k=2 to k=10
     kmeans_performances = pd.DataFrame(columns=['Pr', 'Recall', 'J', 'Rand', 'FM'])
@@ -309,34 +599,25 @@ def run_clustering_analysis(data):
             kmeans_performances = pd.concat([kmeans_performances, default_perf])
             hierarchical_performances = pd.concat([hierarchical_performances, default_perf])
     
-    # Default best k value
-    best_k = 2
+    # Default to the ensemble best_k value
+    best_k = ensemble_best_k
     
-    # Find best k-value based on Rand index if data is available
+    # Find best k-value based on Rand index if data is available (as a fallback)
     if not kmeans_performances.empty and not hierarchical_performances.empty:
         try:
             best_k_kmeans = kmeans_performances['Rand'].idxmax()
             best_k_hierarchical = hierarchical_performances['Rand'].idxmax()
             best_k_kmeans_value = int(best_k_kmeans.split('=')[1])
             best_k_hierarchical_value = int(best_k_hierarchical.split('=')[1])
-            
-            # Determine overall best k (compromise between methods if they differ)
-            if best_k_kmeans_value == best_k_hierarchical_value:
-                best_k = best_k_kmeans_value
-            else:
-                # Use the mean of the two, rounded
-                best_k = round((best_k_kmeans_value + best_k_hierarchical_value) / 2)
         except Exception as e:
-            print(f"Error determining best k value: {str(e)}")
-            # Default to k=2 if we encounter issues
-            best_k = 2
-            best_k_kmeans_value = 2
-            best_k_hierarchical_value = 2
+            print(f"Error determining best k value from performance metrics: {str(e)}")
+            # Default to ensemble best_k
+            best_k_kmeans_value = best_k
+            best_k_hierarchical_value = best_k
     else:
         # Default values if performances are empty
-        best_k = 2
-        best_k_kmeans_value = 2
-        best_k_hierarchical_value = 2
+        best_k_kmeans_value = best_k
+        best_k_hierarchical_value = best_k
     
     # Run K-means and hierarchical with the best k
     try:
@@ -362,7 +643,7 @@ def run_clustering_analysis(data):
         return None, f"Error generating visualizations: {str(e)}"
     
     results = {
-        'k_plot': k_plot,
+        'combined_plot': combined_plot,
         'silhouettes': silhouettes,
         'ch_scores': ch_scores,
         'inertias': inertias,
@@ -374,7 +655,30 @@ def run_clustering_analysis(data):
         'hierarchical_metrics_fig': hierarchical_metrics_fig,
         'best_k_kmeans': best_k_kmeans_value,
         'best_k_hierarchical': best_k_hierarchical_value,
-        'best_k': best_k
+        'best_k': best_k,
+        'ensemble_best_k': ensemble_best_k,
+        'best_k_values': best_k_values
+    }
+    
+    return results, None  # None means no error
+    
+    results = {
+        'k_plot': k_plot,
+        'dendrogram_plot': dendrogram_plot,
+        'silhouettes': silhouettes,
+        'ch_scores': ch_scores,
+        'inertias': inertias,
+        'kmeans_performances': kmeans_performances,
+        'hierarchical_performances': hierarchical_performances,
+        'comparison_fig': comparison_fig,
+        'performance_fig': performance_fig,
+        'kmeans_metrics_fig': kmeans_metrics_fig,
+        'hierarchical_metrics_fig': hierarchical_metrics_fig,
+        'best_k_kmeans': best_k_kmeans_value,
+        'best_k_hierarchical': best_k_hierarchical_value,
+        'best_k': best_k,
+        'ensemble_best_k': ensemble_best_k,
+        'best_k_values': best_k_values
     }
     
     return results, None  # None means no error

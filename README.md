@@ -1,5 +1,6 @@
 # Clustering Analysis Dashboard
-A Streamlit application for analyzing datasets using K-means and Hierarchical clustering algorithms. This tool helps determine the optimal number of clusters and provides detailed visualizations and comparisons of clustering results.
+A Streamlit application for analyzing datasets using K-means and Hierarchical clustering algorithms. This tool helps determine the optimal number of clusters and provides detailed visualizations and comparisons of clustering results.  
+
 ![show](https://github.com/user-attachments/assets/a9e69b57-b7ca-4a30-aea7-663c7c9060e4)
 
 

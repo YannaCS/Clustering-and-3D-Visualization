@@ -10,16 +10,12 @@ A Streamlit application for analyzing datasets using K-means and Hierarchical cl
   - Elbow Method
   - Silhouette Score
   - Calinski-Harabasz Method
-  - Ensemble approach combining all methods
-
+  - Ensemble approach combining all methods  
 - **Comprehensive Performance Metrics**:
   - Precision, Recall, Jaccard Index
   - Rand Index
-  - Fowlkes-Mallows Score
-
+  - Fowlkes-Mallows Score  
 - **Custom Dataset Mapping**: For uploaded files, map columns to appropriate features  
-![cluster_15_25s](https://github.com/user-attachments/assets/e6fcf4e2-03d8-464e-96f7-10ac878d4cb3)
-
 
 ## Installation
 1. Clone this repository:  
@@ -57,7 +53,8 @@ kneed 0.8.1+
 2. Upload a CSV file (must have at least 4 columns: 3 features + 1 class label)
 3. Select which column contains the class labels
 4. Map your data columns to X1, X2, and X3 features
-5. The system will transform your data and perform clustering analysis
+5. The system will transform your data and perform clustering analysis  
+![cluster_15_25s](https://github.com/user-attachments/assets/81123e13-f5f2-4b88-87eb-cd36b26f3b7e)
 
 ### Exploring Results
 Results are organized into 4 tabs:
@@ -66,7 +63,8 @@ Results are organized into 4 tabs:
 
 - View plots of Elbow Method, Silhouette Score, and CH Score
 - Toggle rate of change (first derivative) visibility using buttons
-- See automated best K detection results
+- See automated best K detection results  
+![cluster_27_37s](https://github.com/user-attachments/assets/0e2589f4-42cb-4384-9976-367d4c079e05)
 
 
 #### 2. 3D Visualization:
@@ -86,7 +84,8 @@ Results are organized into 4 tabs:
 
 - Get a data-driven recommendation for the best clustering method
 - See which method (K-means or Hierarchical) performs better for your data
-- Understand the optimal number of clusters for your dataset
+- Understand the optimal number of clusters for your dataset  
+![cluster_38_48s](https://github.com/user-attachments/assets/d0a0d474-96a9-41f2-880e-62579de539dd)
 
 
 

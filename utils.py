@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -11,6 +10,7 @@ from scipy.cluster.hierarchy import dendrogram, linkage
 from scipy.signal import argrelextrema
 import math
 from kneed import KneeLocator
+import io
 
 def find_peak_or_elbow(values, method="peak", consider_rate_of_change=True):
     """
@@ -210,128 +210,330 @@ def choose_k(train_data):
         # If all methods disagree, take the median
         ensemble_best_k = int(np.median(list(best_k_values.values())))
     
-    # Create the visualization with improved layout using standard matplotlib
-    fig = plt.figure(figsize=(15, 8))
+    # Calculate hierarchical clustering linkage for dendrogram
+    Z = linkage(train_data, method='ward')
     
-    # Main title
-    plt.suptitle("Determining the Optimal Number of Clusters", fontsize=16, y=0.98)
+    # Create Plotly visualization
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=[
+            "Elbow Method",
+            "Silhouette Score",
+            "Calinski-Harabasz Score",
+            "Hierarchical Dendrogram"
+        ],
+        specs=[
+            [{"type": "xy"}, {"type": "xy"}],
+            [{"type": "xy"}, {"type": "xy"}]
+        ],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.1
+    )
     
-    # Create the subplots with fixed positions
-    ax_kmeans_title = plt.subplot2grid((4, 4), (0, 0), colspan=3, rowspan=1)
-    ax_hier_title = plt.subplot2grid((4, 4), (0, 3), colspan=1, rowspan=1)
+    # Add title
+    fig.update_layout(
+        title_text="Determining the Optimal Number of Clusters",
+        height=800,
+        width=1200
+    )
     
-    ax1 = plt.subplot2grid((4, 4), (1, 0), colspan=1, rowspan=3)  # Elbow plot
-    ax2 = plt.subplot2grid((4, 4), (1, 1), colspan=1, rowspan=3)  # Silhouette plot
-    ax3 = plt.subplot2grid((4, 4), (1, 2), colspan=1, rowspan=3)  # CH plot
-    ax4 = plt.subplot2grid((4, 4), (1, 3), colspan=1, rowspan=3)  # Dendrogram
+    # 1. Elbow plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(k_range),
+            y=inertias,
+            mode='lines+markers',
+            name='Inertia',
+            line=dict(color='blue')
+        ),
+        row=1, col=1
+    )
     
-    # Add section titles
-    ax_kmeans_title.text(0.5, 0.5, "K-means Clustering Evaluation Metrics", 
-                     ha='center', va='center', fontsize=14, fontweight='bold')
-    ax_kmeans_title.axis('off')
+    # Add vertical line for best k from elbow method
+    fig.add_shape(
+        type="line",
+        x0=best_k_values['elbow'], y0=0,
+        x1=best_k_values['elbow'], y1=max(inertias),
+        line=dict(color="red", width=2, dash="dash"),
+        row=1, col=1
+    )
     
-    ax_hier_title.text(0.5, 0.5, "Hierarchical Clustering", 
-                   ha='center', va='center', fontsize=14, fontweight='bold')
-    ax_hier_title.axis('off')
+    fig.add_annotation(
+        x=best_k_values['elbow'],
+        y=inertias[best_k_values['elbow']-1] if best_k_values['elbow'] <= len(inertias) else inertias[-1],
+        text=f"Best k={best_k_values['elbow']}",
+        showarrow=True,
+        arrowhead=2,
+        row=1, col=1
+    )
     
-    # Elbow plot
-    ax1.plot(k_range, inertias)
-    ax1.axvline(x=best_k_values['elbow'], color='r', linestyle='--')
-    ax1.set_xlabel("K (number of clusters)")
-    ax1.set_ylabel("Inertia (Within-Cluster Distances)")
-    ax1.set_title(f"Elbow Plot (Best K: {best_k_values['elbow']})")
+    # 2. Silhouette plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(2, max_k + 1)),
+            y=silhouettes,
+            mode='lines+markers',
+            name='Silhouette Score',
+            line=dict(color='green')
+        ),
+        row=1, col=2
+    )
     
-    # Silhouette plot
-    ax2.plot(range(2, max_k + 1), silhouettes)
-    ax2.axvline(x=best_k_values['silhouette'], color='r', linestyle='--')
-    
-    # Add first derivative to the silhouette plot
-    if len(silhouettes) > 2:
-        # Plot the rate of change (first derivative)
+    # Add first derivative to silhouette plot if possible
+    if len(silhouettes) > 1:
         first_deriv = np.diff(silhouettes)
-        # Normalize first derivative to fit on the same scale
+        # Normalize to fit on same scale
         max_silhouette = max(abs(np.max(silhouettes)), 0.001)  # Avoid division by zero
         norm_deriv = first_deriv * (max_silhouette / max(abs(first_deriv) + 0.001)) * 0.5
         
-        # Plot first derivative
-        ax2_2 = ax2.twinx()
-        ax2_2.plot(range(3, max_k + 1), norm_deriv, 'g--', alpha=0.5)
-        ax2_2.set_ylabel("Rate of Change", color='g')
-        ax2_2.tick_params(axis='y', labelcolor='g')
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(3, max_k + 1)),
+                y=norm_deriv,
+                mode='lines',
+                name='Rate of Change',
+                line=dict(color='lightgreen', dash='dash')
+            ),
+            row=1, col=2
+        )
     
-    ax2.set_xlabel("K (number of clusters)")
-    ax2.set_ylabel("Silhouette Score")
-    ax2.set_title(f"Silhouette Plot (Best K: {best_k_values['silhouette']})")
+    # Add vertical line for best k from silhouette method
+    if best_k_values['silhouette'] >= 2 and best_k_values['silhouette'] <= max_k:
+        silhouette_index = best_k_values['silhouette'] - 2  # convert to index (k=2 is index 0)
+        if silhouette_index < len(silhouettes):
+            fig.add_shape(
+                type="line",
+                x0=best_k_values['silhouette'], y0=0,
+                x1=best_k_values['silhouette'], y1=max(silhouettes),
+                line=dict(color="red", width=2, dash="dash"),
+                row=1, col=2
+            )
+            
+            fig.add_annotation(
+                x=best_k_values['silhouette'],
+                y=silhouettes[silhouette_index],
+                text=f"Best k={best_k_values['silhouette']}",
+                showarrow=True,
+                arrowhead=2,
+                row=1, col=2
+            )
     
-    # CH plot
-    ax3.plot(range(2, max_k + 1), ch_coeffs)
-    ax3.axvline(x=best_k_values['ch'], color='r', linestyle='--')
+    # 3. CH plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(2, max_k + 1)),
+            y=ch_coeffs,
+            mode='lines+markers',
+            name='CH Score',
+            line=dict(color='purple')
+        ),
+        row=2, col=1
+    )
     
-    # Add first derivative to the CH plot
-    if len(ch_coeffs) > 2:
-        # Plot the rate of change (first derivative)
+    # Add first derivative to CH plot if possible
+    if len(ch_coeffs) > 1:
         first_deriv = np.diff(ch_coeffs)
-        # Normalize first derivative to fit on the same scale
+        # Normalize to fit on same scale
         max_ch = max(abs(np.max(ch_coeffs)), 0.001)  # Avoid division by zero
         norm_deriv = first_deriv * (max_ch / max(abs(first_deriv) + 0.001)) * 0.5
         
-        # Plot first derivative
-        ax3_2 = ax3.twinx()
-        ax3_2.plot(range(3, max_k + 1), norm_deriv, 'g--', alpha=0.5)
-        ax3_2.set_ylabel("Rate of Change", color='g')
-        ax3_2.tick_params(axis='y', labelcolor='g')
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(3, max_k + 1)),
+                y=norm_deriv,
+                mode='lines',
+                name='Rate of Change',
+                line=dict(color='mediumpurple', dash='dash')
+            ),
+            row=2, col=1
+        )
     
-    ax3.set_xlabel("K (number of clusters)")
-    ax3.set_ylabel("CH Score")
-    ax3.set_title(f"CH Plot (Best K: {best_k_values['ch']})")
+    # Add vertical line for best k from CH method
+    if best_k_values['ch'] >= 2 and best_k_values['ch'] <= max_k:
+        ch_index = best_k_values['ch'] - 2  # convert to index (k=2 is index 0)
+        if ch_index < len(ch_coeffs):
+            fig.add_shape(
+                type="line",
+                x0=best_k_values['ch'], y0=0,
+                x1=best_k_values['ch'], y1=max(ch_coeffs),
+                line=dict(color="red", width=2, dash="dash"),
+                row=2, col=1
+            )
+            
+            fig.add_annotation(
+                x=best_k_values['ch'],
+                y=ch_coeffs[ch_index],
+                text=f"Best k={best_k_values['ch']}",
+                showarrow=True,
+                arrowhead=2,
+                row=2, col=1
+            )
     
-    # Create hierarchical clustering dendrogram
-    # Calculate the linkage matrix
-    Z = linkage(train_data, method='ward')
+    # 4. Dendrogram - This is trickier in Plotly, will create a simplified version
+    # Extract the coordinates for the dendrogram lines
+    icoord = []
+    dcoord = []
+    color_list = []
     
-    # Plot dendrogram
-    dendrogram(Z, truncate_mode='level', p=3, ax=ax4)
+    # Convert scipy dendrogram to plotly format
+    def _get_dendrogram_data(Z, show_labels=False):
+        from scipy.cluster.hierarchy import dendrogram
+        ddata = dendrogram(Z, no_plot=True)
+        
+        x = []
+        y = []
+        
+        line_width = []
+        
+        for i, d in enumerate(ddata['dcoord']):
+            x.extend(ddata['icoord'][i])
+            x.append(None)
+            y.extend(d)
+            y.append(None)
+            
+            # Line width based on height
+            line_width.extend([2] * 4)  # 4 points per linkage
+            line_width.append(None)  # Break between linkages
+        
+        return x, y, line_width
     
-    # If best_k is provided, add a horizontal line showing where to cut for that number of clusters
+    x, y, line_width = _get_dendrogram_data(Z)
+    
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode='lines',
+            line=dict(color='black', width=1),
+            hoverinfo='none',
+            name='Dendrogram'
+        ),
+        row=2, col=2
+    )
+    
+    # Add horizontal line for ensemble best k
     if ensemble_best_k:
-        # Find the height to cut the tree to get the desired number of clusters
-        last_merge = Z[-(ensemble_best_k-1), 2]
-        ax4.axhline(y=last_merge, color='r', linestyle='--')
-        ax4.set_title(f"Hierarchical Clustering Dendrogram\n(Best K: {ensemble_best_k})")
-    else:
-        ax4.set_title("Hierarchical Clustering Dendrogram")
+        # Find the height to cut the tree to get ensemble_best_k clusters
+        cut_height = Z[-(ensemble_best_k-1), 2] if ensemble_best_k > 1 and ensemble_best_k <= len(Z) + 1 else 0
+        
+        fig.add_shape(
+            type="line",
+            x0=0, y0=cut_height,
+            x1=len(train_data) * 10, y1=cut_height,  # Making the line span the full width
+            line=dict(color="red", width=2, dash="dash"),
+            row=2, col=2
+        )
+        
+        fig.add_annotation(
+            x=len(train_data) * 5,  # Middle of the plot
+            y=cut_height,
+            text=f"Cut for k={ensemble_best_k}",
+            showarrow=True,
+            arrowhead=2,
+            row=2, col=2
+        )
     
-    ax4.set_xlabel("Node Points")
-    ax4.set_ylabel("Distance")
+    # Update titles and labels
+    fig.update_xaxes(title_text="K (number of clusters)", row=1, col=1)
+    fig.update_yaxes(title_text="Inertia", row=1, col=1)
     
-    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for the suptitle
+    fig.update_xaxes(title_text="K (number of clusters)", row=1, col=2)
+    fig.update_yaxes(title_text="Silhouette Score", row=1, col=2)
+    
+    fig.update_xaxes(title_text="K (number of clusters)", row=2, col=1)
+    fig.update_yaxes(title_text="CH Score", row=2, col=1)
+    
+    fig.update_xaxes(title_text="Sample index", row=2, col=2)
+    fig.update_yaxes(title_text="Distance", row=2, col=2)
+    
+    # Create a clean layout
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5
+        )
+    )
     
     return fig, silhouettes, ch_coeffs, inertias, ensemble_best_k, best_k_values
 
-def plot_dendrogram(data, best_k=None):
-    """Create hierarchical clustering dendrogram with optimal cut line"""
+def plot_dendrogram_plotly(data, best_k=None):
+    """Create hierarchical clustering dendrogram with optimal cut line using Plotly"""
     # Calculate the linkage matrix
     Z = linkage(data, method='ward')
     
-    # Create figure
-    plt.figure(figsize=(10, 6))
+    # Convert scipy dendrogram to plotly format
+    def _get_dendrogram_data(Z, show_labels=False):
+        from scipy.cluster.hierarchy import dendrogram
+        ddata = dendrogram(Z, no_plot=True)
+        
+        x = []
+        y = []
+        
+        line_width = []
+        
+        for i, d in enumerate(ddata['dcoord']):
+            x.extend(ddata['icoord'][i])
+            x.append(None)
+            y.extend(d)
+            y.append(None)
+            
+            # Line width based on height
+            line_width.extend([2] * 4)  # 4 points per linkage
+            line_width.append(None)  # Break between linkages
+        
+        return x, y, line_width
     
-    # Plot dendrogram
-    dendrogram(Z, truncate_mode='level', p=3)
+    x, y, line_width = _get_dendrogram_data(Z)
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add dendrogram lines
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode='lines',
+            line=dict(color='black', width=1),
+            hoverinfo='none',
+            name='Dendrogram'
+        )
+    )
     
     # If best_k is provided, add a horizontal line showing where to cut for that number of clusters
     if best_k:
         # Find the height to cut the tree to get the desired number of clusters
-        last_merge = Z[-(best_k-1), 2]
-        plt.axhline(y=last_merge, color='r', linestyle='--')
-        plt.title(f"Hierarchical Clustering Dendrogram (Best K: {best_k})")
-    else:
-        plt.title("Hierarchical Clustering Dendrogram")
+        cut_height = Z[-(best_k-1), 2] if best_k > 1 and best_k <= len(Z) + 1 else 0
+        
+        fig.add_shape(
+            type="line",
+            x0=0, y0=cut_height,
+            x1=len(data) * 10, y1=cut_height,  # Making the line span the full width
+            line=dict(color="red", width=2, dash="dash")
+        )
+        
+        fig.add_annotation(
+            x=len(data) * 5,  # Middle of the plot
+            y=cut_height,
+            text=f"Cut for k={best_k}",
+            showarrow=True,
+            arrowhead=2
+        )
     
-    plt.xlabel("Number of points in node (or index of point if no parenthesis)")
-    plt.ylabel("Distance")
+    # Update layout
+    fig.update_layout(
+        title=f"Hierarchical Clustering Dendrogram{f' (Best K: {best_k})' if best_k else ''}",
+        xaxis_title="Number of points in node (or index of point if no parenthesis)",
+        yaxis_title="Distance",
+        height=600,
+        width=800
+    )
     
-    return plt.gcf()
+    return fig
 
 def external_performance_by_pair_confusion(true_label, pred_label, n_clusters):
     """Function to evaluate clustering performance against ground truth"""
@@ -374,7 +576,6 @@ def plot_clusters_3d(data, labels, title="3D Cluster Visualization"):
         color=labels, title=title, width=800, height=600
     )
     return fig
-
 
 def create_comparison_fig(original_data, kmeans_results, hierarchical_results, title_suffix=""):
     """Create a side-by-side comparison of clustering methods"""
@@ -434,13 +635,11 @@ def create_comparison_fig(original_data, kmeans_results, hierarchical_results, t
     fig.update_layout(height=600, width=1200)
     return fig
 
-def plot_performance_comparison(df_kmeans, df_hierarchical, k_value):
-    """Create bar chart comparing K-means and Hierarchical clustering performance"""
+def plot_performance_comparison_plotly(df_kmeans, df_hierarchical, k_value):
+    """Create bar chart comparing K-means and Hierarchical clustering performance using Plotly"""
     metrics = ['Pr', 'Recall', 'J', 'Rand', 'FM']
-    width = 0.35
     
-    fig, ax = plt.subplots(figsize=(10, 6))
-    x = np.arange(len(metrics))
+    fig = go.Figure()
     
     try:
         # Filter for the specific k-value
@@ -451,50 +650,125 @@ def plot_performance_comparison(df_kmeans, df_hierarchical, k_value):
             kmeans_data = df_kmeans.loc[k_idx, metrics].values
             hierarchical_data = df_hierarchical.loc[k_idx, metrics].values
             
-            ax.bar(x - width/2, kmeans_data, width, label='K-Means')
-            ax.bar(x + width/2, hierarchical_data, width, label='Hierarchical')
+            # Add bars for each algorithm
+            fig.add_trace(go.Bar(
+                x=metrics,
+                y=kmeans_data,
+                name='K-Means',
+                marker_color='#4285F4', # nice blue
+                width=0.4,
+                offset=-0.2
+            ))
+            
+            fig.add_trace(go.Bar(
+                x=metrics,
+                y=hierarchical_data,
+                name='Hierarchical',
+                marker_color='#e74639', # nice red
+                width=0.4,
+                offset=0.2
+            ))
         else:
             # Use the first available index if the specific k doesn't exist
             kmeans_data = df_kmeans.iloc[0][metrics].values if not df_kmeans.empty else np.zeros(len(metrics))
             hierarchical_data = df_hierarchical.iloc[0][metrics].values if not df_hierarchical.empty else np.zeros(len(metrics))
             
-            ax.bar(x - width/2, kmeans_data, width, label='K-Means')
-            ax.bar(x + width/2, hierarchical_data, width, label='Hierarchical')
+            # Add bars for each algorithm
+            fig.add_trace(go.Bar(
+                x=metrics,
+                y=kmeans_data,
+                name='K-Means',
+                marker_color='#4285F4',
+                width=0.4,
+                offset=-0.2
+            ))
+            
+            fig.add_trace(go.Bar(
+                x=metrics,
+                y=hierarchical_data,
+                name='Hierarchical',
+                marker_color='#e74639',
+                width=0.4,
+                offset=0.2
+            ))
     except Exception as e:
         print(f"Error creating performance comparison: {str(e)}")
         # Create empty bars in case of error
-        ax.bar(x - width/2, np.zeros(len(metrics)), width, label='K-Means')
-        ax.bar(x + width/2, np.zeros(len(metrics)), width, label='Hierarchical')
+        fig.add_trace(go.Bar(
+            x=metrics,
+            y=np.zeros(len(metrics)),
+            name='K-Means',
+            marker_color='#4285F4',
+            width=0.4,
+            offset=-0.2
+        ))
+        
+        fig.add_trace(go.Bar(
+            x=metrics,
+            y=np.zeros(len(metrics)),
+            name='Hierarchical',
+            marker_color='#e74639',
+            width=0.4,
+            offset=0.2
+        ))
     
-    ax.set_xticks(x)
-    ax.set_xticklabels(metrics)
-    ax.set_ylabel('Value')
-    ax.set_xlabel('Performance Metrics')
-    ax.set_title(f'Clustering Performance Comparison (k={k_value})')
-    ax.legend()
+    # Update layout
+    fig.update_layout(
+        title=f'Clustering Performance Comparison (k={k_value})',
+        xaxis_title='Performance Metrics',
+        yaxis_title='Value',
+        barmode='group',
+        height=500,
+        width=800
+    )
     
     return fig
 
-def plot_performance_metrics(df_performances, method_name="Clustering"):
-    """Plot the performance metrics across different k values"""
-    fig, ax = plt.subplots(figsize=(10, 6))
+def plot_performance_metrics_plotly(df_performances, method_name="Clustering"):
+    """Plot the performance metrics across different k values using Plotly"""
+    fig = go.Figure()
     
     # If the DataFrame is empty, return an empty plot
     if df_performances.empty:
-        ax.set_title(f"No performance data available for {method_name}")
+        fig.update_layout(
+            title=f"No performance data available for {method_name}",
+            xaxis_title="Number of clusters",
+            yaxis_title="Coefficient",
+            height=500,
+            width=700
+        )
         return fig
     
-    for column in df_performances.columns:
-        ax.plot(range(len(df_performances)), df_performances[column], label=column)
+    # Get x-values based on index (k values)
+    x_values = [int(idx.split('=')[1]) for idx in df_performances.index]
     
-    # Set x-axis labels based on actual index values
-    ax.set_xticks(range(len(df_performances)))
-    ax.set_xticklabels(df_performances.index)
+    # Add a trace for each metric
+    colors = px.colors.qualitative.Plotly
+    for i, column in enumerate(df_performances.columns):
+        fig.add_trace(go.Scatter(
+            x=x_values,
+            y=df_performances[column].values,
+            mode='lines+markers',
+            name=column,
+            line=dict(width=2, color=colors[i % len(colors)])
+        ))
     
-    ax.set_ylabel('Coefficient')
-    ax.set_xlabel('Number of clusters')
-    ax.set_title(f'Performance Metrics for {method_name}')
-    ax.legend()
+    # Update layout
+    fig.update_layout(
+        title=f'Performance Metrics for {method_name}',
+        xaxis_title='Number of clusters (k)',
+        yaxis_title='Coefficient',
+        height=500,
+        width=700,
+        hovermode="x unified"
+    )
+    
+    # Configure axes
+    fig.update_xaxes(
+        tickmode='array',
+        tickvals=x_values,
+        ticktext=[f'k={k}' for k in x_values]
+    )
     
     return fig
 
@@ -542,7 +816,7 @@ def generate_synthetic_data5():
     
     # Add extra points to first cluster to match the original dataset
     extra_points = np.random.normal(
-        loc=[center_x, center_y, center_z], 
+        loc=[2, 0, 0], 
         scale=0.3, 
         size=(2, 3)
     )
@@ -569,7 +843,7 @@ def run_clustering_analysis(data):
     labels = data_copy['Class']
     
     # Determine optimal number of clusters with automated detection
-    combined_plot, silhouettes, ch_scores, inertias, ensemble_best_k, best_k_values = choose_k(features)
+    combined_plot_plotly, silhouettes, ch_scores, inertias, ensemble_best_k, best_k_values = choose_k(features)
     
     # Run K-means and hierarchical clustering for k=2 to k=10
     kmeans_performances = pd.DataFrame(columns=['Pr', 'Recall', 'J', 'Rand', 'FM'])
@@ -632,27 +906,35 @@ def run_clustering_analysis(data):
         )
         
         # Performance comparison chart
-        performance_fig = plot_performance_comparison(
+        performance_fig_plotly = plot_performance_comparison_plotly(
             kmeans_performances, hierarchical_performances, best_k
         )
         
         # Performance metrics plots
-        kmeans_metrics_fig = plot_performance_metrics(kmeans_performances, "K-means")
-        hierarchical_metrics_fig = plot_performance_metrics(hierarchical_performances, "Hierarchical")
+        kmeans_metrics_fig_plotly = plot_performance_metrics_plotly(kmeans_performances, "K-means")
+        hierarchical_metrics_fig_plotly = plot_performance_metrics_plotly(hierarchical_performances, "Hierarchical")
     except Exception as e:
         return None, f"Error generating visualizations: {str(e)}"
     
+    # Store original data for derivative toggles
+    optimal_clusters_data = {
+        'inertias': inertias,
+        'silhouettes': silhouettes,
+        'ch_scores': ch_scores
+    }
+    
     results = {
-        'combined_plot': combined_plot,
+        'combined_plot_plotly': combined_plot_plotly,
+        'optimal_clusters_data': optimal_clusters_data, # Store raw data for derivative toggles
         'silhouettes': silhouettes,
         'ch_scores': ch_scores,
         'inertias': inertias,
         'kmeans_performances': kmeans_performances,
         'hierarchical_performances': hierarchical_performances,
         'comparison_fig': comparison_fig,
-        'performance_fig': performance_fig,
-        'kmeans_metrics_fig': kmeans_metrics_fig,
-        'hierarchical_metrics_fig': hierarchical_metrics_fig,
+        'performance_fig_plotly': performance_fig_plotly,
+        'kmeans_metrics_fig_plotly': kmeans_metrics_fig_plotly,
+        'hierarchical_metrics_fig_plotly': hierarchical_metrics_fig_plotly,
         'best_k_kmeans': best_k_kmeans_value,
         'best_k_hierarchical': best_k_hierarchical_value,
         'best_k': best_k,
@@ -660,25 +942,293 @@ def run_clustering_analysis(data):
         'best_k_values': best_k_values
     }
     
-    return results, None  # None means no error
+    return results, None  # None means no errordef create_optimal_clusters_plot(inertias, silhouettes, ch_scores, best_k_values, ensemble_best_k, 
+                          # show_elbow_derivative=False, show_silhouette_derivative=False, show_ch_derivative=False):
+    """Create a plotly visualization of optimal clusters with togglable derivatives"""
+    # Calculate max k value
+    max_k = len(inertias)
+    k_range = range(1, max_k + 1)
     
-    results = {
-        'k_plot': k_plot,
-        'dendrogram_plot': dendrogram_plot,
-        'silhouettes': silhouettes,
-        'ch_scores': ch_scores,
-        'inertias': inertias,
-        'kmeans_performances': kmeans_performances,
-        'hierarchical_performances': hierarchical_performances,
-        'comparison_fig': comparison_fig,
-        'performance_fig': performance_fig,
-        'kmeans_metrics_fig': kmeans_metrics_fig,
-        'hierarchical_metrics_fig': hierarchical_metrics_fig,
-        'best_k_kmeans': best_k_kmeans_value,
-        'best_k_hierarchical': best_k_hierarchical_value,
-        'best_k': best_k,
-        'ensemble_best_k': ensemble_best_k,
-        'best_k_values': best_k_values
-    }
+    # Create the subplots
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=[
+            "Elbow Method",
+            "Silhouette Score",
+            "Calinski-Harabasz Score",
+            "Hierarchical Dendrogram"
+        ],
+        specs=[
+            [{"type": "xy"}, {"type": "xy"}],
+            [{"type": "xy"}, {"type": "xy"}]
+        ],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.1
+    )
     
-    return results, None  # None means no error
+    # Add title
+    fig.update_layout(
+        title_text="Determining the Optimal Number of Clusters",
+        height=800,
+        width=1200
+    )
+    
+    # 1. Elbow plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(k_range),
+            y=inertias,
+            mode='lines+markers',
+            name='Inertia',
+            line=dict(color='blue'),
+            marker=dict(size=8)
+        ),
+        row=1, col=1
+    )
+    
+    # Add rate of change for Elbow method if toggled
+    if show_elbow_derivative and len(inertias) > 1:
+        # Calculate first derivative
+        elbow_derivatives = np.diff(inertias)
+        # Normalize to make it visible on the same scale
+        max_inertia = max(abs(np.max(inertias)), 0.001)  # Avoid division by zero
+        norm_elbow_deriv = elbow_derivatives * (max_inertia / max(abs(elbow_derivatives) + 0.001)) * 0.5
+        
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(1, max_k)),  # One less point for derivative
+                y=norm_elbow_deriv,
+                mode='lines+markers',
+                name='Elbow Rate of Change',
+                line=dict(color='darkblue', dash='dash'),
+                marker=dict(size=6),
+                opacity=0.7
+            ),
+            row=1, col=1
+        )
+    
+    # Add vertical line for best k from elbow method
+    fig.add_shape(
+        type="line",
+        x0=best_k_values['elbow'], y0=0,
+        x1=best_k_values['elbow'], y1=max(inertias),
+        line=dict(color="red", width=2, dash="dash"),
+        row=1, col=1
+    )
+    
+    fig.add_annotation(
+        x=best_k_values['elbow'],
+        y=inertias[best_k_values['elbow']-1] if best_k_values['elbow'] <= len(inertias) else inertias[-1],
+        text=f"Best k={best_k_values['elbow']}",
+        showarrow=True,
+        arrowhead=2,
+        row=1, col=1
+    )
+    
+    # 2. Silhouette plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(2, max_k + 1)),
+            y=silhouettes,
+            mode='lines+markers',
+            name='Silhouette Score',
+            line=dict(color='green'),
+            marker=dict(size=8)
+        ),
+        row=1, col=2
+    )
+    
+    # Add rate of change for Silhouette method if toggled
+    if show_silhouette_derivative and len(silhouettes) > 1:
+        # Calculate first derivative
+        silhouette_derivatives = np.diff(silhouettes)
+        # Normalize to fit on same scale
+        max_silhouette = max(abs(np.max(silhouettes)), 0.001)  # Avoid division by zero
+        norm_silhouette_deriv = silhouette_derivatives * (max_silhouette / max(abs(silhouette_derivatives) + 0.001)) * 0.5
+        
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(3, max_k + 1)),  # Starts at k=3 for silhouette derivative
+                y=norm_silhouette_deriv,
+                mode='lines+markers',
+                name='Silhouette Rate of Change',
+                line=dict(color='darkgreen', dash='dash'),
+                marker=dict(size=6),
+                opacity=0.7
+            ),
+            row=1, col=2
+        )
+    
+    # Add vertical line for best k from silhouette method
+    if best_k_values['silhouette'] >= 2 and best_k_values['silhouette'] <= max_k:
+        silhouette_index = best_k_values['silhouette'] - 2  # convert to index (k=2 is index 0)
+        if silhouette_index < len(silhouettes):
+            fig.add_shape(
+                type="line",
+                x0=best_k_values['silhouette'], y0=0,
+                x1=best_k_values['silhouette'], y1=max(silhouettes),
+                line=dict(color="red", width=2, dash="dash"),
+                row=1, col=2
+            )
+            
+            fig.add_annotation(
+                x=best_k_values['silhouette'],
+                y=silhouettes[silhouette_index],
+                text=f"Best k={best_k_values['silhouette']}",
+                showarrow=True,
+                arrowhead=2,
+                row=1, col=2
+            )
+    
+    # 3. CH plot
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(2, max_k + 1)),
+            y=ch_scores,
+            mode='lines+markers',
+            name='CH Score',
+            line=dict(color='purple'),
+            marker=dict(size=8)
+        ),
+        row=2, col=1
+    )
+    
+    # Add rate of change for CH method if toggled
+    if show_ch_derivative and len(ch_scores) > 1:
+        # Calculate first derivative
+        ch_derivatives = np.diff(ch_scores)
+        # Normalize to fit on same scale
+        max_ch = max(abs(np.max(ch_scores)), 0.001)  # Avoid division by zero
+        norm_ch_deriv = ch_derivatives * (max_ch / max(abs(ch_derivatives) + 0.001)) * 0.5
+        
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(3, max_k + 1)),  # Starts at k=3 for CH derivative
+                y=norm_ch_deriv,
+                mode='lines+markers',
+                name='CH Rate of Change',
+                line=dict(color='darkviolet', dash='dash'),
+                marker=dict(size=6),
+                opacity=0.7
+            ),
+            row=2, col=1
+        )
+    
+    # Add vertical line for best k from CH method
+    if best_k_values['ch'] >= 2 and best_k_values['ch'] <= max_k:
+        ch_index = best_k_values['ch'] - 2  # convert to index (k=2 is index 0)
+        if ch_index < len(ch_scores):
+            fig.add_shape(
+                type="line",
+                x0=best_k_values['ch'], y0=0,
+                x1=best_k_values['ch'], y1=max(ch_scores),
+                line=dict(color="red", width=2, dash="dash"),
+                row=2, col=1
+            )
+            
+            fig.add_annotation(
+                x=best_k_values['ch'],
+                y=ch_scores[ch_index],
+                text=f"Best k={best_k_values['ch']}",
+                showarrow=True,
+                arrowhead=2,
+                row=2, col=1
+            )
+    
+    # 4. Ensemble decision and simulated dendrogram
+    # For simplicity, create a bar chart to show the ensemble decision
+    fig.add_trace(
+        go.Bar(
+            x=['Elbow', 'Silhouette', 'CH', 'Ensemble'],
+            y=[best_k_values['elbow'], best_k_values['silhouette'], best_k_values['ch'], ensemble_best_k],
+            marker_color=['blue', 'green', 'purple', 'red'],
+            text=[f"k={best_k_values['elbow']}", f"k={best_k_values['silhouette']}", 
+                 f"k={best_k_values['ch']}", f"k={ensemble_best_k}"],
+            name='Best k Values'
+        ),
+        row=2, col=2
+    )
+    
+    # Update titles and labels
+    fig.update_xaxes(title_text="K (number of clusters)", row=1, col=1)
+    fig.update_yaxes(title_text="Inertia", row=1, col=1)
+    
+    fig.update_xaxes(title_text="K (number of clusters)", row=1, col=2)
+    fig.update_yaxes(title_text="Silhouette Score", row=1, col=2)
+    
+    fig.update_xaxes(title_text="K (number of clusters)", row=2, col=1)
+    fig.update_yaxes(title_text="CH Score", row=2, col=1)
+    
+    fig.update_xaxes(title_text="Method", row=2, col=2)
+    fig.update_yaxes(title_text="Best k Value", row=2, col=2)
+    
+    # Add annotation for ensemble decision
+    fig.add_annotation(
+        x='Ensemble', y=ensemble_best_k,
+        text=f"Final k={ensemble_best_k}",
+        showarrow=True,
+        arrowhead=2,
+        row=2, col=2
+    )
+    
+    # Create a clean layout
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5
+        )
+    )
+    
+    return fig
+
+def validate_data(data):
+    """Validate uploaded data for clustering analysis"""
+    # Check if data is a DataFrame
+    if not isinstance(data, pd.DataFrame):
+        return False, "Data must be a pandas DataFrame."
+    
+    # Check if data has at least 4 columns (3 features + class)
+    if data.shape[1] < 4:
+        return False, "Data must have at least 4 columns (3 features + class label)."
+    
+    # Check if data has enough rows for clustering
+    if data.shape[0] < 10:
+        return False, "Data must have at least 10 rows for meaningful clustering."
+    
+    return True, "Data is valid for clustering analysis."
+
+def preprocess_data(data, feature_mapping=None, class_column='Class'):
+    """
+    Preprocess data for clustering analysis
+    
+    Parameters:
+    - data: The input DataFrame
+    - feature_mapping: Dictionary mapping X1, X2, X3 to original column names
+    - class_column: The column containing class labels
+    
+    Returns:
+    - Preprocessed DataFrame with columns X1, X2, X3, Class
+    """
+    # Make a copy to avoid modifying the original
+    result = data.copy()
+    
+    # If feature_mapping is provided, use it to transform the data
+    if feature_mapping:
+        # Create a new DataFrame with the transformed columns
+        transformed = pd.DataFrame({
+            'X1': result[feature_mapping['X1']],
+            'X2': result[feature_mapping['X2']],
+            'X3': result[feature_mapping['X3']],
+            'Class': result[class_column]
+        })
+        return transformed
+    
+    # If no mapping is provided, just ensure 'Class' column is present and named correctly
+    if 'Class' not in result.columns and class_column in result.columns:
+        result = result.rename(columns={class_column: 'Class'})
+    
+    return result

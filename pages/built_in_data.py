@@ -1,74 +1,170 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
+import io
 
 import utils
 
 def show():
     """Display the built-in datasets page"""
-    st.header("Pre-loaded Dataset Analysis")
+    st.header("Dataset Analysis")
     
-    # Dataset selection
-    dataset_choice = st.radio("Choose a dataset", ["Data1", "Data5"])
+    # Add tab selection for built-in data or upload
+    data_source = st.radio("Choose data source", ["Built-in Datasets", "Upload Your Data"])
     
-    if dataset_choice == "Data1":
-        # Load Data1 from the provided CSV or create it
-        try:
-            data1 = pd.read_csv("./data/Data1.csv")
-            if "Unnamed: 0" in data1.columns:
-                data1 = data1.drop(columns=["Unnamed: 0"])
-        except:
-            # Generate sample data if CSV not found
-            st.info("Using synthetic Data1 as example (original file not found)")
-            data1 = utils.generate_synthetic_data1()
+    if data_source == "Built-in Datasets":
+        # Dataset selection
+        dataset_choice = st.radio("Choose a dataset", ["Data1", "Data5"])
         
-        # Display dataset info
-        with st.expander("Dataset Information"):
-            st.write("**Data1**: This dataset consists of 800 points in 3D space, divided into 2 classes.")
-            st.dataframe(data1.head())
-            st.write(f"Shape: {data1.shape}")
-            st.write(f"Class distribution: {data1['Class'].value_counts().to_dict()}")
-        
-        # Run clustering analysis
-        results, error = utils.run_clustering_analysis(data1)
-        
-    elif dataset_choice == "Data5":
-        # Load Data5 from the provided CSV or create it
-        try:
-            data5 = pd.read_csv("./data/Data5.csv")
-            if "Unnamed: 0" in data5.columns:
-                data5 = data5.drop(columns=["Unnamed: 0"])
-        except:
-            # Generate sample data if CSV not found
-            st.info("Using synthetic Data5 as example (original file not found)")
-            data5 = utils.generate_synthetic_data5()
-        
-        # Display dataset info
-        with st.expander("Dataset Information"):
-            st.write("**Data5**: This dataset consists of 212 points in 3D space, divided into 7 classes.")
-            st.dataframe(data5.head())
-            st.write(f"Shape: {data5.shape}")
-            st.write(f"Class distribution: {data5['Class'].value_counts().to_dict()}")
-        
-        # Run clustering analysis
-        results, error = utils.run_clustering_analysis(data5)
-    
-    # Display results or error
-    if error:
-        st.error(error)
-    elif results:
-        data_to_use = None
-        if dataset_choice == "Data1" and 'data1' in locals() and data1 is not None:
-            data_to_use = data1
-        elif dataset_choice == "Data5" and 'data5' in locals() and data5 is not None:
-            data_to_use = data5
+        if dataset_choice == "Data1":
+            # Load Data1 from the provided CSV or create it
+            try:
+                data1 = pd.read_csv("./data/Data1.csv")
+                if "Unnamed: 0" in data1.columns:
+                    data1 = data1.drop(columns=["Unnamed: 0"])
+            except:
+                # Generate sample data if CSV not found
+                st.info("Using synthetic Data1 as example (original file not found)")
+                data1 = utils.generate_synthetic_data1()
             
-        display_results(results, data_to_use is not None, data_to_use)
+            # Display dataset info
+            with st.expander("Dataset Information"):
+                st.write("**Data1**: This dataset consists of 800 points in 3D space, divided into 2 classes.")
+                st.dataframe(data1.head())
+                st.write(f"Shape: {data1.shape}")
+                st.write(f"Class distribution: {data1['Class'].value_counts().to_dict()}")
+            
+            # Run clustering analysis
+            data_to_analyze = data1
+            
+        elif dataset_choice == "Data5":
+            # Load Data5 from the provided CSV or create it
+            try:
+                data5 = pd.read_csv("./data/Data5.csv")
+                if "Unnamed: 0" in data5.columns:
+                    data5 = data5.drop(columns=["Unnamed: 0"])
+            except:
+                # Generate sample data if CSV not found
+                st.info("Using synthetic Data5 as example (original file not found)")
+                data5 = utils.generate_synthetic_data5()
+            
+            # Display dataset info
+            with st.expander("Dataset Information"):
+                st.write("**Data5**: This dataset consists of 212 points in 3D space, divided into 7 classes.")
+                st.dataframe(data5.head())
+                st.write(f"Shape: {data5.shape}")
+                st.write(f"Class distribution: {data5['Class'].value_counts().to_dict()}")
+            
+            # Run clustering analysis
+            data_to_analyze = data5
+            
+        # Ensure we have properly formatted data
+        feature_mapping = None  # No need for feature mapping with built-in datasets
+        class_column = 'Class'  # Class column is already correctly named
+        
+    else:  # "Upload Your Data"
+        st.subheader("Upload Your Data")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        
+        if uploaded_file is not None:
+            # Read the uploaded file
+            try:
+                user_data = pd.read_csv(uploaded_file)
+                if "Unnamed: 0" in user_data.columns:
+                    user_data = user_data.drop(columns=["Unnamed: 0"])
+                    
+                # Display dataset info
+                with st.expander("Dataset Information"):
+                    st.write("**Uploaded Dataset**")
+                    st.dataframe(user_data.head())
+                    st.write(f"Shape: {user_data.shape}")
+                
+                # Feature mapping section
+                st.subheader("Feature Mapping")
+                st.write("Your data should have 3 feature columns and 1 class column.")
+                
+                # Check if the dataset meets minimum requirements
+                if len(user_data.columns) < 4:
+                    st.error("Your dataset should have at least 4 columns (3 features + 1 class).")
+                    return
+                
+                # Let the user select which columns to use
+                st.write("Select which columns to use for analysis:")
+                
+                # Select class column
+                class_column = st.selectbox(
+                    "Select the column containing class labels:", 
+                    options=user_data.columns,
+                    index=len(user_data.columns) - 1  # Default to last column if possible
+                )
+                
+                # Get remaining columns that can be used as features
+                feature_candidates = [col for col in user_data.columns if col != class_column]
+                
+                # Ensure that the selected class column contains valid class labels
+                if not user_data[class_column].dtype.kind in 'iufO':
+                    st.warning(f"Column '{class_column}' may not be suitable for class labels. It has data type {user_data[class_column].dtype}.")
+                
+                # Create feature mapping
+                feature_mapping = {}
+                
+                if len(feature_candidates) >= 3:
+                    # Select which columns to use for X1, X2, X3
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        x1_col = st.selectbox("Select column for X1", options=feature_candidates, index=0)
+                        feature_mapping['X1'] = x1_col
+                    
+                    with col2:
+                        remaining_x2 = [col for col in feature_candidates if col != x1_col]
+                        x2_col = st.selectbox("Select column for X2", options=remaining_x2, index=0)
+                        feature_mapping['X2'] = x2_col
+                    
+                    with col3:
+                        remaining_x3 = [col for col in feature_candidates if col not in [x1_col, x2_col]]
+                        x3_col = st.selectbox("Select column for X3", options=remaining_x3, index=0)
+                        feature_mapping['X3'] = x3_col
+                    
+                    # Apply the mapping to create a transformed dataset
+                    data_to_analyze = pd.DataFrame({
+                        'X1': user_data[feature_mapping['X1']],
+                        'X2': user_data[feature_mapping['X2']],
+                        'X3': user_data[feature_mapping['X3']],
+                        'Class': user_data[class_column]
+                    })
+                    
+                    # Display the transformed dataset
+                    st.subheader("Transformed Dataset")
+                    st.dataframe(data_to_analyze.head())
+                    st.write(f"Shape: {data_to_analyze.shape}")
+                    st.write(f"Class distribution: {data_to_analyze['Class'].value_counts().to_dict()}")
+                else:
+                    st.error("Your dataset needs at least 3 feature columns in addition to the class column.")
+                    return
+            except Exception as e:
+                st.error(f"Error processing the uploaded file: {str(e)}")
+                return
+        else:
+            st.info("Please upload a CSV file to analyze.")
+            return
+    
+    # Run analysis only if we have data to analyze
+    if 'data_to_analyze' in locals() and data_to_analyze is not None:
+        with st.spinner("Running clustering analysis..."):
+            results, error = utils.run_clustering_analysis(data_to_analyze)
+            
+            if error:
+                st.error(error)
+            elif results:
+                # Display results
+                display_results(results, True, data_to_analyze)
+    else:
+        st.warning("No data available for analysis.")
 
 def get_clustering_recommendation(kmeans_performances, hierarchical_performances, ensemble_k):
     """
@@ -414,14 +510,19 @@ def display_summary(results, has_data=False, data=None):
 def display_results(results, has_data=False, data=None):
     """Display the results of clustering analysis"""
     # Create tabs for organizing results
-    tabs = st.tabs(["Optimal Clusters", "3D Visualization", "Summary & Recommendations", "Performance Metrics", "Detailed Results"])
+    tabs = st.tabs(["Optimal Clusters", "3D Visualization",  "Performance Metrics", "Summary & Recommendations",
+                    #, "Detailed Results"
+                    ])
     
     # Optimal Clusters tab
     with tabs[0]:
         st.subheader("Choose K")
         
-        # Display combined plot of all evaluation metrics
-        st.pyplot(results['combined_plot'])
+        # Convert matplotlib combined_plot to plotly
+        if 'combined_plot_plotly' in results:
+            st.plotly_chart(results['combined_plot_plotly'], use_container_width=True)
+        else:
+            st.pyplot(results['combined_plot'])
         
         # Show the best K values
         st.subheader("Automated Best K Detection")
@@ -521,7 +622,7 @@ def display_results(results, has_data=False, data=None):
                 # Select the optimal k as default
                 optimal_index = k_values.index(optimal_k) if optimal_k in k_values else 0
                 
-                kmeans_k_option = st.radio(
+                kmeans_k_option = st.selectbox(
                     "Select number of clusters for K-means:",
                     options=kmeans_options,
                     index=optimal_index
@@ -548,7 +649,7 @@ def display_results(results, has_data=False, data=None):
                 else:
                     default_index = k_values.index(ensemble_k) if ensemble_k in k_values else 0
                 
-                hierarchical_k_option = st.radio(
+                hierarchical_k_option = st.selectbox(
                     "Select number of clusters for Hierarchical:",
                     options=hierarchical_options,
                     index=default_index
@@ -616,28 +717,36 @@ def display_results(results, has_data=False, data=None):
             The performance metrics plot shows how each metric changes with different k values for both algorithms.
             The red dashed lines mark your currently selected k values, with annotations showing the exact metric values at those points.
             """)
-    
-    # Summary & Recommendations tab
-    with tabs[2]:
-        display_summary(results, has_data, data)
+
     
     # Performance Metrics tab
-    with tabs[3]:
+    with tabs[2]:
         st.subheader("Performance Comparison")
         
         # Performance comparison at best K
-        st.pyplot(results['performance_fig'])
+        if 'performance_fig_plotly' in results:
+            st.plotly_chart(results['performance_fig_plotly'], use_container_width=True)
+        else:
+            st.pyplot(results['performance_fig'])
         
         # Performance across all K values
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("K-means Performance Across K Values")
-            st.pyplot(results['kmeans_metrics_fig'])
+            if 'kmeans_metrics_fig_plotly' in results:
+                st.plotly_chart(results['kmeans_metrics_fig_plotly'], use_container_width=True)
+            else:
+                st.pyplot(results['kmeans_metrics_fig'])
+            st.dataframe(results['kmeans_performances'])
         
         with col2:
             st.subheader("Hierarchical Performance Across K Values")
-            st.pyplot(results['hierarchical_metrics_fig'])
-        
+            if 'hierarchical_metrics_fig_plotly' in results:
+                st.plotly_chart(results['hierarchical_metrics_fig_plotly'], use_container_width=True)
+            else:
+                st.pyplot(results['hierarchical_metrics_fig'])
+            st.dataframe(results['hierarchical_performances'])
+
         with st.expander("Metrics Explanation"):
             st.write("""
             - **Precision (Pr)**: The ratio of true positive pairs to all pairs predicted to be in the same cluster
@@ -646,16 +755,20 @@ def display_results(results, has_data=False, data=None):
             - **Rand Index**: The percentage of correct decisions (true positives and true negatives)
             - **Fowlkes-Mallows Score (FM)**: Geometric mean of precision and recall
             """)
+
+    # Summary & Recommendations tab
+    with tabs[3]:
+        display_summary(results, has_data, data)
     
     # Detailed Results tab
-    with tabs[4]:
-        st.subheader("Detailed Performance Metrics")
+    # with tabs[4]:
+    #     st.subheader("Detailed Performance Metrics")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("K-means Performance for all K values:")
-            st.dataframe(results['kmeans_performances'])
+    #     col1, col2 = st.columns(2)
+    #     with col1:
+    #         st.write("K-means Performance for all K values:")
+    #         st.dataframe(results['kmeans_performances'])
         
-        with col2:
-            st.write("Hierarchical Clustering Performance for all K values:")
-            st.dataframe(results['hierarchical_performances'])
+    #     with col2:
+    #         st.write("Hierarchical Clustering Performance for all K values:")
+    #         st.dataframe(results['hierarchical_performances'])

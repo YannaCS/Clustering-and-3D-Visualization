@@ -19,14 +19,10 @@ A Streamlit application for analyzing datasets using K-means and Hierarchical cl
 
 ## Installation
 1. Clone this repository:  
-    git clone https://github.com/yourusername/clustering-analysis.git  
-    cd clustering-analysis  
-
-2. Install required dependencies:
-pip install -r requirements.txt
-
-3. Run the application:
-streamlit run app_all_in_one.py
+3. Install required dependencies:
+    pip install -r requirements.txt  
+4. Run the application:
+    streamlit run app_all_in_one.py
 
 
 ## Requirements

@@ -3,8 +3,6 @@ A Streamlit application for analyzing datasets using K-means and Hierarchical cl
 
 ![cluster_0_10s](https://github.com/user-attachments/assets/693948d0-25f9-40a6-8c74-1107e5dbb740)
 
-
-
 ## Features
 - **Multiple Data Sources**: Analyze built-in sample datasets or upload your own CSV files
 - **Interactive 3D Visualizations**: Compare original data with K-means and Hierarchical clustering results
@@ -19,7 +17,9 @@ A Streamlit application for analyzing datasets using K-means and Hierarchical cl
   - Rand Index
   - Fowlkes-Mallows Score
 
-- **Custom Dataset Mapping**: For uploaded files, map columns to appropriate features
+- **Custom Dataset Mapping**: For uploaded files, map columns to appropriate features  
+![cluster_15_25s](https://github.com/user-attachments/assets/e6fcf4e2-03d8-464e-96f7-10ac878d4cb3)
+
 
 ## Installation
 1. Clone this repository:  

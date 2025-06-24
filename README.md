@@ -1,8 +1,12 @@
 # Clustering Analysis Dashboard
 A Streamlit application for analyzing datasets using K-means and Hierarchical clustering algorithms. This tool helps determine the optimal number of clusters and provides detailed visualizations and comparisons of clustering results.  
 
-Try it out: https://clustering-and-3d-plot.streamlit.app/  
-![cluster_0_10s](https://github.com/user-attachments/assets/693948d0-25f9-40a6-8c74-1107e5dbb740)
+🎯 **Try it out**: https://clustering-and-3d-plot.streamlit.app/  
+![cluster_0_10s](https://github.com/user-attachments/assets/693948d0-25f9-40a6-8c74-1107e5dbb740)  
+- more dataset can be found in folder data
+- data2 and data3 have the same structure as built in dataset, data1 and data5
+- data 4's features' names are different, but can be mapped by the app
+- upload your own dataset with 3 (XYZ) features and 1 class feature to try!
 
 ## Features
 - **Multiple Data Sources**: Analyze built-in sample datasets or upload your own CSV files
